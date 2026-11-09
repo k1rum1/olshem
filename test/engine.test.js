@@ -71,3 +71,29 @@ test('CSV: русские заголовки, запятая и пропущен
   assert.ok(res.dataset.rows.every((r) => Number.isFinite(r.baseline)));
   assert.doesNotThrow(() => recommendHours(analyze(res.dataset)));
 });
+
+test('вклад школ: средний около нуля, есть школы-образцы', () => {
+  const vas = an.schoolStats.map((s) => s.va);
+  assert.equal(vas.length, 24);
+  assert.ok(Math.abs(vas.reduce((a, b) => a + b, 0) / vas.length) < 1.5);
+  assert.ok(Object.keys(an.mentors).length >= 1);
+});
+
+test('уровни усвоения в сумме дают 100%', () => {
+  for (const t of an.topicStats) assert.ok(Math.abs(t.bands.reduce((a, b) => a + b, 0) - 1) < 1e-9);
+});
+
+test('симулятор: переход с Б на Ә выгоден, обратный — нет', async () => {
+  const { simulateSwitch } = await import('../public/engine.js');
+  const s = simulateSwitch(an, 'Б', 'Ә');
+  assert.ok(s.gain > 0 && s.schools === 7);
+  assert.ok(simulateSwitch(an, 'Ә', 'Б').gain < 0);
+  assert.equal(simulateSwitch(an, 'А', 'А'), null);
+});
+
+test('анализ работает на одном районе', () => {
+  const sub = { ...ds, rows: ds.rows.filter((r) => r.district === 'г. Тараз') };
+  const a = analyze(sub);
+  assert.equal(a.n.schools, 8);
+  assert.doesNotThrow(() => recommendHours(a));
+});

@@ -165,7 +165,12 @@ export function parseCSV(text) {
   text = text.replace(/^﻿/, '');
   const first = text.split(/\r?\n/, 1)[0] || '';
   const delim = (first.match(/;/g) || []).length >= (first.match(/,/g) || []).length ? ';' : ',';
-  const table = splitCSV(text, delim);
+  return parseTable(splitCSV(text, delim));
+}
+
+// Общий разбор таблицы (из CSV или Excel): первая строка — заголовки.
+export function parseTable(table) {
+  table = table.map((r) => r.map((v) => (v == null ? '' : String(v))));
   if (table.length < 2) return { errors: [{ code: 'empty' }] };
   const head = table[0].map((h) => h.trim().toLowerCase());
   const idx = {};
@@ -181,13 +186,20 @@ export function parseCSV(text) {
   const topicIds = new Map();
   const topics = [];
   const rows = [];
-  const num = (v) => Number(String(v).replace(',', '.').replace('%', '').trim());
+  const num = (v) => (String(v).trim() === '' ? NaN : Number(String(v).replace(',', '.').replace('%', '').trim()));
+  // Excel хранит проценты долями (75% = 0.75): если все значения ≤ 1, переводим в проценты.
+  const scaleOf = (k) => {
+    if (idx[k] === undefined) return 1;
+    const vals = table.slice(1).map((r) => num(r[idx[k]] ?? '')).filter(Number.isFinite);
+    return vals.length && vals.every((v) => v >= 0 && v <= 1) ? 100 : 1;
+  };
+  const sScale = scaleOf('score'), bScale = scaleOf('baseline');
   for (let li = 1; li < table.length; li++) {
     const c = table[li];
     const get = (k) => (idx[k] === undefined ? '' : (c[idx[k]] ?? '').trim());
-    const score = num(get('score')), hours = num(get('hours'));
+    const score = num(get('score')) * sScale, hours = num(get('hours'));
     const baselineRaw = get('baseline');
-    const baseline = baselineRaw === '' ? NaN : num(baselineRaw);
+    const baseline = baselineRaw === '' ? NaN : num(baselineRaw) * bScale;
     if (!Number.isFinite(score) || score < 0 || score > 100) { errors.push({ code: 'badScore', line: li + 1 }); continue; }
     if (!Number.isFinite(hours) || hours <= 0) { errors.push({ code: 'badHours', line: li + 1 }); continue; }
     const tname = get('topic');
@@ -195,7 +207,8 @@ export function parseCSV(text) {
     if (!topicIds.has(tname)) {
       const id = `T${topicIds.size + 1}`;
       topicIds.set(tname, id);
-      topics.push({ id, ru: tname, kz: tname });
+      const known = DEMO_TOPICS.find((t) => [t.ru, t.kz].some((n) => n.toLowerCase() === tname.toLowerCase()));
+      topics.push({ id, ru: known ? known.ru : tname, kz: known ? known.kz : tname });
     }
     rows.push({
       district: get('district') || '—', school: get('school'), cls: get('class') || '—',
@@ -262,6 +275,10 @@ export function analyze(ds, { bootstrap = 300, seed = 7 } = {}) {
       schoolSpread: sd(schoolMeans.map((x) => x.mean)),
       schoolMeans: schoolMeans.sort((a, b) => a.mean - b.mean),
       hist,
+      bands: [
+        sc.filter((v) => v < FAIL).length, sc.filter((v) => v >= FAIL && v < 65).length,
+        sc.filter((v) => v >= 65 && v < MASTERED).length, sc.filter((v) => v >= MASTERED).length,
+      ].map((k) => k / sc.length),
       hoursMedian: median(rs.map((x) => x.hours)),
     };
   });
@@ -364,6 +381,42 @@ export function analyze(ds, { bootstrap = 300, seed = 7 } = {}) {
     model[t.id] = { ...point, slopeLo: quantile(slopeQ, 0.05), slopeHi: quantile(slopeQ, 0.95), bs, adjQ };
   }
 
+  // Школы: насколько результат выше или ниже ожидаемого при таком уровне учеников,
+  // часах и учебнике. Это вклад самой школы — у кого стоит перенимать опыт.
+  const schoolInfo = {};
+  for (const x of ds.rows) {
+    const m = model[x.topic];
+    if (!m) continue;
+    const f = feat(x);
+    const pred = f.reduce((s, v, i) => s + v * m.beta[i], 0);
+    const si = (schoolInfo[x.school] ||= { school: x.school, district: x.district, textbook: x.textbook, students: new Set(), topics: {} });
+    si.students.add(x.student);
+    const tp = (si.topics[x.topic] ||= { sum: 0, pred: 0, res: [], hours: x.hours });
+    tp.sum += x.score; tp.pred += pred; tp.res.push(x.score - pred);
+  }
+  const schoolStats = Object.values(schoolInfo).map((si) => {
+    const perTopic = {};
+    const all = [];
+    for (const [id, tp] of Object.entries(si.topics)) {
+      const n = tp.res.length;
+      const va = mean(tp.res);
+      perTopic[id] = { mean: tp.sum / n, expected: tp.pred / n, va, se: sd(tp.res) / Math.sqrt(n), n, hours: tp.hours };
+      all.push(...tp.res);
+    }
+    const va = mean(all);
+    return {
+      school: si.school, district: si.district, textbook: si.textbook, students: si.students.size,
+      mean: mean(Object.values(perTopic).map((p) => p.mean)), va, se: sd(all) / Math.sqrt(all.length), perTopic,
+    };
+  }).sort((a, b) => b.va - a.va);
+  // Для каждой темы — школа-образец: лучший вклад при достаточной уверенности.
+  const mentors = {};
+  for (const t of topics) {
+    const cand = schoolStats.map((s) => ({ school: s.school, ...s.perTopic[t.id] })).filter((p) => Number.isFinite(p.va) && p.n >= 15);
+    cand.sort((a, b) => b.va - a.va);
+    if (cand[0] && cand[0].va - 1.96 * cand[0].se > 0) mentors[t.id] = cand[0];
+  }
+
   // Учебники: сырое среднее против скорректированного на уровень учеников и часы.
   const textbooks = books.map((bk) => {
     const rs = ds.rows.filter((x) => x.textbook === bk);
@@ -411,7 +464,8 @@ export function analyze(ds, { bootstrap = 300, seed = 7 } = {}) {
 
   return {
     n: { rows: ds.rows.length, students: students.size, schools: schools.length, topics: topics.length, books: books.length },
-    overall, failOverall, topicStats, textbooks, topicWinners, model, books, ref,
+    overall, failOverall, topicStats, textbooks, topicWinners, model, books, ref, schoolStats, mentors,
+    districts: [...new Set(ds.rows.map((x) => x.district))],
     blMean,
   };
 }
@@ -459,4 +513,28 @@ export function recommendHours(an, { total, maxChange = 0.35, minHours = 4, equi
   const totalRec = rows.reduce((s, x) => s + x.recommended, 0);
   const avgGain = mean(rows.map((x) => x.effect));
   return { rows, totalNow, totalRec, avgGain };
+}
+
+// ---------- 6. Что будет, если школы перейдут на другой учебник ----------
+// Разница эффектов учебников из модели, по каждой теме, для учеников школ с учебником `from`.
+export function simulateSwitch(an, from, to) {
+  if (from === to) return null;
+  const tf = an.textbooks.find((b) => b.id === from), tt = an.textbooks.find((b) => b.id === to);
+  if (!tf || !tt) return null;
+  const perTopic = an.topicStats.map((t) => {
+    const a = tf.perTopic[t.id], b = tt.perTopic[t.id];
+    if (!a || !b) return null;
+    const m = an.model[t.id];
+    const diffs = m.bs.map((bm) => bm.adj[to] - bm.adj[from]).sort((x, y) => x - y);
+    return { id: t.id, gain: b.adj - a.adj, lo: quantile(diffs, 0.05), hi: quantile(diffs, 0.95) };
+  }).filter(Boolean);
+  const schools = an.schoolStats.filter((s) => s.textbook === from);
+  return {
+    from, to, perTopic,
+    gain: mean(perTopic.map((p) => p.gain)),
+    schools: schools.length,
+    students: schools.reduce((s, x) => s + x.students, 0),
+    sure: perTopic.filter((p) => p.lo > 0).length,
+    worse: perTopic.filter((p) => p.hi < 0).length,
+  };
 }
