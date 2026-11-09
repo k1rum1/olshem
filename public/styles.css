@@ -271,3 +271,47 @@ code { font-size: 13.5px; background: var(--side); padding: 1px 6px; border-radi
   main::before { display: none; }
   .report { border: 0; padding: 0; max-width: none; }
 }
+
+/* ---------- фильтр района ---------- */
+.district { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 14px; }
+.district select, .sim-pick select {
+  font: 500 14px var(--sans); color: var(--ink); background: #fff; border: 1px solid var(--rule);
+  border-radius: 6px; padding: 4px 8px; cursor: pointer;
+}
+
+/* ---------- уровни усвоения ---------- */
+.levels { display: flex; height: 14px; width: 150px; gap: 2px; }
+.levels-h { width: 170px; }
+.lv { height: 100%; width: var(--w); border-radius: 2px; }
+.lv0 { background: var(--red); }
+.lv1 { background: #A9BEEC; }
+.lv2 { background: #5F86DB; }
+.lv3 { background: var(--pen); }
+.legend i.lv { width: 12px; height: 10px; border-radius: 2px; }
+h3.gap { margin-top: 18px; }
+
+/* ---------- расходящиеся полосы: симулятор и школы ---------- */
+.sim { display: grid; gap: 2px; }
+.sim-row { display: grid; grid-template-columns: minmax(0, 280px) 1fr 110px; align-items: center; gap: 14px; min-height: 34px; font-size: 15px; }
+.sim-row .n { text-align: right; font-weight: 600; white-space: nowrap; }
+.sim-track, .va { position: relative; display: block; height: 22px; }
+.sim-zero { position: absolute; left: 50%; top: 0; bottom: 0; border-left: 1px solid var(--ink-2); }
+.sim-ci { position: absolute; top: 9px; height: 4px; left: var(--a); width: calc(var(--b) - var(--a)); background: var(--muted); opacity: .3; border-radius: 2px; }
+.sim-bar { position: absolute; top: 4px; height: 14px; left: var(--a); width: calc(var(--b) - var(--a)); border-radius: 3px; }
+.sim-bar.pos { background: var(--pen); }
+.sim-bar.neg { background: var(--red); }
+.sim-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--ink-2); margin-bottom: 14px; }
+.va-cell { width: 34%; min-width: 150px; }
+.va .mk { width: 13px; height: 13px; margin: -6.5px 0 0 -6.5px; }
+.schools-table td { vertical-align: middle; }
+@media (max-width: 860px) {
+  .sim-row { grid-template-columns: 1fr 70px; }
+  .sim-row .sim-track { grid-column: 1 / -1; grid-row: 2; }
+  .va-cell { min-width: 90px; }
+  .context { gap: 8px; }
+}
+.legend i.lv0 { background: var(--red); }
+.legend i.lv1 { background: #A9BEEC; }
+.legend i.lv2 { background: #5F86DB; }
+.legend i.lv3 { background: var(--pen); }
+.actions.after { margin: 18px 0 0; }

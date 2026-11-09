@@ -1,4 +1,5 @@
-import { generateDemo, analyze, recommendHours, toCSV, parseCSV, FAIL } from './engine.js';
+import { generateDemo, analyze, recommendHours, simulateSwitch, toCSV, parseCSV, parseTable, FAIL } from './engine.js';
+import { readXlsx } from './xlsx.js';
 import { STR, pct } from './i18n.js';
 
 const BOOK_COLORS = ['#1F4FC1', '#C26A00', '#009682'];
@@ -9,7 +10,8 @@ const store = {
 
 const state = {
   lang: store.get('olshem.lang') === 'kz' ? 'kz' : 'ru',
-  ds: null, an: null,
+  full: null, ds: null, an: null, district: 'all', cache: new Map(),
+  openSchool: null, sim: null,
   hours: { total: null, maxChange: 0.35 },
   openTopic: null,
   uploadMsg: null,
@@ -26,14 +28,25 @@ const topicName = (id) => {
 const bookColor = (id) => BOOK_COLORS[state.an.books.indexOf(id) % BOOK_COLORS.length];
 
 function load(ds) {
-  state.ds = ds;
-  state.an = analyze(ds);
+  state.full = ds;
+  state.cache.clear();
+  state.district = 'all';
+  state.sim = null;
+  applyDistrict();
+}
+
+function applyDistrict() {
+  const d = state.district;
+  state.ds = d === 'all' ? state.full : { ...state.full, rows: state.full.rows.filter((r) => r.district === d) };
+  if (!state.cache.has(d)) state.cache.set(d, analyze(state.ds));
+  state.an = state.cache.get(d);
   state.hours.total = null;
   state.openTopic = null;
+  state.openSchool = null;
 }
 
 // ---------- каркас ----------
-const ROUTES = ['overview', 'topics', 'books', 'hours', 'data', 'report'];
+const ROUTES = ['overview', 'topics', 'books', 'schools', 'hours', 'data', 'report'];
 function route() {
   const r = location.hash.replace('#', '');
   return ROUTES.includes(r) ? r : 'overview';
@@ -50,8 +63,11 @@ function renderNav() {
 function header(title, lead) {
   const { ds, an } = state;
   const subject = state.lang === 'kz' ? ds.meta.subjectKz : ds.meta.subjectRu;
+  const districts = [...new Set(state.full.rows.map((r) => r.district))];
+  const picker = districts.length > 1 ? `<label class="district">${esc(T().district)}
+      <select id="district">${['all', ...districts].map((d) => `<option value="${esc(d)}" ${d === state.district ? 'selected' : ''}>${esc(d === 'all' ? T().allRegion : d)}</option>`).join('')}</select></label>` : '';
   return `
-    <p class="context"><span class="subject">${esc(subject)}${ds.meta.year ? `, ${esc(ds.meta.year)}` : ''}</span>
+    <p class="context"><span class="subject">${esc(subject)}${ds.meta.year ? `, ${esc(ds.meta.year)}` : ''}</span>${picker}
       <span class="badge ${ds.meta.demo ? 'demo' : 'own'}">${esc(ds.meta.demo ? T().demoBadge : T().ownBadge)}</span></p>
     <h1>${esc(title)}</h1>
     ${lead ? `<p class="lead">${esc(lead)}</p>` : ''}
@@ -61,9 +77,10 @@ function header(title, lead) {
 function render() {
   renderNav();
   const r = route();
-  const view = { overview, topics, books, hours, data, report }[r];
+  const view = { overview, topics, books, schools, hours, data, report }[r];
   $('#main').innerHTML = view();
   bind[r]?.();
+  $('#district')?.addEventListener('change', (e) => { state.district = e.target.value; applyDistrict(); render(); $('#district')?.focus(); });
 }
 
 // ---------- обзор ----------
@@ -91,6 +108,8 @@ function overview() {
     if (h.root) s += ' ' + t.fRoot(topicName(h.id), topicName(h.root.topic), h.root.rr);
     findings.push({ text: s, href: `#topics`, topic: h.id });
   }
+  const hm = hard.find((h) => an.mentors[h.id]);
+  if (hm) findings.push({ text: t.fMentor(topicName(hm.id), an.mentors[hm.id].school), href: '#schools' });
   if (an.books.length > 1) {
     const b = bookStory();
     findings.push({ text: b.rawTop.id !== b.adjTop.id ? t.fBook(b.rawTop.id, b.adjTop.id) : t.fBookSame(b.adjTop.id), href: '#books' });
@@ -135,17 +154,18 @@ function topics() {
     ${header(t.tpTitle, t.tpLead)}
     <section class="sheet">
       <table class="table topics">
-        <thead><tr><th>${t.col.topic}</th><th class="n">${t.col.mean}</th><th class="n">${t.col.fail}</th><th class="n hide-s">${t.col.mastered}</th><th class="n hide-s">${t.col.spread}</th><th class="n hide-s">${t.col.hours}</th></tr></thead>
+        <thead><tr><th>${t.col.topic}</th><th class="n">${t.col.mean}</th><th class="n">${t.col.fail}</th><th class="hide-s levels-h">${t.levels}</th><th class="n hide-s">${t.col.spread}</th><th class="n hide-s">${t.col.hours}</th></tr></thead>
         <tbody>
         ${an.topicStats.map((s, i) => `
           <tr class="row ${s.hard ? 'is-hard' : ''} ${state.openTopic === s.id ? 'is-open' : ''}" data-topic="${s.id}" tabindex="0" aria-expanded="${state.openTopic === s.id}">
             <td><span class="num">${i + 1}</span>${esc(topicName(s.id))}${s.hard ? ` <span class="flag">${t.hard}</span>` : ''}</td>
             <td class="n">${pct(s.mean)}</td><td class="n ${s.fail >= 0.2 ? 'bad' : ''}">${pct(s.fail * 100)}</td>
-            <td class="n hide-s">${pct(s.mastered * 100)}</td><td class="n hide-s">${s.schoolSpread.toFixed(1)}</td><td class="n hide-s">${s.hoursMedian}</td>
+            <td class="hide-s">${levelsBar(s)}</td><td class="n hide-s">${s.schoolSpread.toFixed(1)}</td><td class="n hide-s">${s.hoursMedian}</td>
           </tr>
           ${state.openTopic === s.id ? `<tr class="detail"><td colspan="6">${topicDetail(s)}</td></tr>` : ''}`).join('')}
         </tbody>
       </table>
+      ${levelsLegend()}
     </section>`;
 }
 
@@ -171,8 +191,21 @@ function topicDetail(s) {
     <div><h3>${t.schoolsTitle}</h3><div class="strip">${dots}</div><div class="hist-axis"><span>${a}%</span><span>${b}%</span></div>
       ${legendBooks()}
       <p>${esc(t.spreadText(s.schoolSpread))}</p></div>
-    <div><h3>${t.rootTitle}</h3><p>${esc(root)}</p></div>
+    <div><h3>${t.rootTitle}</h3><p>${esc(root)}</p>
+      <h3 class="gap">${state.lang === 'kz' ? 'Кімнен үйрену керек' : 'У кого учиться'}</h3>
+      <p>${esc(state.an.mentors[s.id] ? t.mentorText(state.an.mentors[s.id].school, state.an.mentors[s.id].va) : t.noMentor)}</p></div>
   </div>`;
+}
+
+function levelsBar(s) {
+  const t = T();
+  const segs = s.bands.map((v, i) => `<span class="lv lv${i}" style="--w:${(v * 100).toFixed(2)}%"></span>`).join('');
+  const tip = t.levelNames.map((n, i) => `${n}: ${pct(s.bands[i] * 100)}`).join('; ');
+  return `<span class="levels" data-tip="${esc(tip)}" role="img" aria-label="${esc(tip)}">${segs}</span>`;
+}
+
+function levelsLegend() {
+  return `<p class="legend">${T().levelNames.map((n, i) => `<span><i class="lv lv${i}"></i>${esc(n)}</span>`).join('')}</p>`;
 }
 
 function legendBooks() {
@@ -225,7 +258,91 @@ function books() {
             <td class="hide-s win">${w && w.confident ? esc(t.winner(w.best)) : `<span class="muted">${esc(t.noWinner)}</span>`}</td></tr>`;
         }).join('')}</tbody>
       </table></div>
+    </section>
+    ${simulator()}`;
+}
+
+function simulator() {
+  const t = T(), an = state.an;
+  const b = bookStory();
+  const sim0 = state.sim && an.books.includes(state.sim.from) && an.books.includes(state.sim.to) && state.sim.from !== state.sim.to
+    ? state.sim : { from: b.byAdj[b.byAdj.length - 1].id, to: b.adjTop.id };
+  if (sim0.from === sim0.to) return '';
+  const r = simulateSwitch(an, sim0.from, sim0.to);
+  if (!r || !r.schools) return '';
+  const opt = (sel) => an.books.map((x) => `<option value="${esc(x)}" ${x === sel ? 'selected' : ''}>${esc(x)}</option>`).join('');
+  const maxAbs = Math.max(3, ...r.perTopic.map((p) => Math.max(Math.abs(p.lo), Math.abs(p.hi))));
+  const X = (v) => (50 + (v / maxAbs) * 50).toFixed(2);
+  const rows = r.perTopic.map((p) => {
+    const sure = p.lo > 0 ? 'up' : p.hi < 0 ? 'down' : '';
+    return `<div class="sim-row">
+      <span class="sim-name">${esc(topicName(p.id))}</span>
+      <span class="sim-track"><span class="sim-zero"></span>
+        <span class="sim-ci" style="--a:${X(p.lo)}%;--b:${X(p.hi)}%"></span>
+        <span class="sim-bar ${p.gain >= 0 ? 'pos' : 'neg'}" style="--a:${X(Math.min(0, p.gain))}%;--b:${X(Math.max(0, p.gain))}%" data-tip="${esc(`${fmt1(p.gain)} ${t.points} (${fmt1(p.lo)}…${fmt1(p.hi)})`)}"></span></span>
+      <span class="n ${sure}">${fmt1(p.gain)}</span>
+    </div>`;
+  }).join('');
+  return `<section class="sheet">
+    <h2>${esc(t.simTitle)}</h2>
+    <div class="sim-pick">${esc(t.simFrom)} <select id="simFrom">${opt(sim0.from)}</select> ${esc(t.simTo)} <select id="simTo">${opt(sim0.to)}</select></div>
+    <p class="verdict">${esc(t.simResult(r.schools, r.students, fmt1(r.gain)))}</p>
+    <div class="sim">${rows}</div>
+    <p class="note">${esc(t.simSure(r.sure, r.worse, r.perTopic.length))} ${esc(t.simNote)}</p>
+  </section>`;
+}
+
+// ---------- школы ----------
+function schools() {
+  const t = T(), an = state.an;
+  const list = an.schoolStats;
+  const maxAbs = Math.max(4, ...list.map((s) => Math.abs(s.va) + 1.96 * s.se));
+  const X = (v) => (50 + (v / maxAbs) * 50).toFixed(2);
+  const label = (s) => (s.va - 1.96 * s.se > 0 ? 'up' : s.va + 1.96 * s.se < 0 ? 'down' : '');
+  const rows = list.map((s) => {
+    const open = state.openSchool === s.school;
+    return `<tr class="row ${open ? 'is-open' : ''}" data-school="${esc(s.school)}" tabindex="0" aria-expanded="${open}">
+      <td><b>${esc(s.school)}</b><small class="sens">${esc(s.district)}, ${esc(t.textbook.toLowerCase())} ${esc(s.textbook)}</small></td>
+      <td class="n hide-s">${s.students}</td>
+      <td class="n">${pct(s.mean)}</td>
+      <td class="va-cell"><span class="va">
+        <span class="sim-zero"></span>
+        <span class="sim-ci" style="--a:${X(s.va - 1.96 * s.se)}%;--b:${X(s.va + 1.96 * s.se)}%"></span>
+        <span class="mk adj" style="--x:${X(s.va)}%;--c:${s.va >= 0 ? 'var(--pen)' : 'var(--red)'}" data-tip="${esc(`${fmt1(s.va)} ${t.scVaHint}`)}"></span>
+      </span></td>
+      <td class="n ${label(s)}">${fmt1(s.va)}</td>
+    </tr>
+    ${open ? `<tr class="detail"><td colspan="5">${schoolCard(s)}</td></tr>` : ''}`;
+  }).join('');
+  const hard = hardTopics();
+  const mentors = hard.map((h) => `<li><b>${esc(topicName(h.id))}</b> — ${esc(an.mentors[h.id] ? t.mentorText(an.mentors[h.id].school, an.mentors[h.id].va) : t.noMentor)}</li>`).join('');
+  return `
+    ${header(t.scTitle, t.scLead)}
+    ${hard.length ? `<section class="sheet"><h2>${esc(t.mentorsTitle)}</h2><ul class="method">${mentors}</ul></section>` : ''}
+    <section class="sheet">
+      <div class="scroll"><table class="table topics schools-table">
+        <thead><tr><th>${state.lang === 'kz' ? 'Мектеп' : 'Школа'}</th><th class="n hide-s">${state.lang === 'kz' ? 'Оқушы' : 'Учеников'}</th><th class="n">${t.col.mean}</th><th>${esc(t.scVa)}</th><th class="n">${esc(t.scVaHint)}</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      <p class="legend"><span><i style="--c:var(--pen)"></i>${esc(t.scAbove)}</span><span><i style="--c:var(--red)"></i>${esc(t.scBelow)}</span><span><i class="ln"></i>${esc(t.bkCI.replace('90', '95'))}</span></p>
     </section>`;
+}
+
+function schoolCard(s) {
+  const t = T();
+  const items = state.ds.topics.map((tp) => ({ id: tp.id, ...s.perTopic[tp.id] })).filter((p) => Number.isFinite(p.va));
+  const maxAbs = Math.max(5, ...items.map((p) => Math.abs(p.va)));
+  const X = (v) => (50 + (v / maxAbs) * 50).toFixed(2);
+  const sorted = [...items].sort((a, b) => b.va - a.va);
+  const rows = items.map((p) => `<div class="sim-row">
+      <span class="sim-name">${esc(topicName(p.id))}</span>
+      <span class="sim-track"><span class="sim-zero"></span>
+        <span class="sim-bar ${p.va >= 0 ? 'pos' : 'neg'}" style="--a:${X(Math.min(0, p.va))}%;--b:${X(Math.max(0, p.va))}%" data-tip="${esc(`${fmt1(p.va)} ${t.points}`)}"></span></span>
+      <span class="n">${pct(p.mean)} <small class="muted">/ ${pct(p.expected)}</small></span>
+    </div>`).join('');
+  return `<h3>${esc(t.scCard(s.school))}</h3>
+    <p class="note">${esc(t.scBest(topicName(sorted[0].id)))}. ${esc(t.scWorst(topicName(sorted[sorted.length - 1].id)))}. ${state.lang === 'kz' ? 'Сан: нақты / күтілген.' : 'Цифры: факт / ожидалось.'}</p>
+    <div class="sim">${rows}</div>`;
 }
 
 // ---------- часы ----------
@@ -268,8 +385,16 @@ function hours() {
         <tbody>${rows}</tbody>
         <tfoot><tr><td></td><td></td><td class="n">${r.totalNow}</td><td class="n strong">${r.totalRec}</td><td class="hide-s"></td></tr></tfoot>
       </table></div>
+      <div class="actions after"><button class="btn" id="hrExport" type="button">${esc(state.lang === 'kz' ? 'Жоспарды Excel үшін жүктеп алу' : 'Скачать план часов для Excel')}</button></div>
       <p class="note">${esc(t.hrNote)}</p>
     </section>`;
+}
+
+function download(name, text) {
+  const blob = new Blob(['\uFEFF' + text], { type: 'text/csv;charset=utf-8' });
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
 // ---------- данные ----------
@@ -280,9 +405,9 @@ function data() {
     ${header(t.dtTitle, t.dtLead)}
     <section class="sheet">
       <div class="actions">
-        <label class="btn primary"><input type="file" id="file" accept=".csv,text/csv" hidden>${esc(t.dtUpload)}</label>
+        <label class="btn primary"><input type="file" id="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>${esc(t.dtUpload)}</label>
         <button class="btn" id="tpl" type="button">${esc(t.dtTemplate)}</button>
-        ${state.ds.meta.demo ? '' : `<button class="btn" id="reset" type="button">${esc(t.dtReset)}</button>`}
+        ${state.full.meta.demo ? '' : `<button class="btn" id="reset" type="button">${esc(t.dtReset)}</button>`}
       </div>
       ${msg ? `<div class="msg ${msg.ok ? 'ok' : 'bad'}" role="status">${msg.lines.map((l) => `<p>${esc(l)}</p>`).join('')}</div>` : ''}
       <h2>${esc(t.dtCols)}</h2>
@@ -307,9 +432,10 @@ function report() {
     <div class="report">
       <div class="report-top"><p class="context">${esc(date)}</p><button class="btn" id="print" type="button">${esc(t.rpPrint)}</button></div>
       <h1>${esc(t.rpTitle)}</h1>
-      <p>${esc(t.rpIntro(subject, an.n))}</p>
+      <p>${esc(t.rpIntro(subject + (state.district !== 'all' ? `, ${state.district}` : ''), an.n))}</p>
       <h2>${esc(t.rpHard)}</h2>
       ${hard.length ? `<ul>${hard.map((h) => `<li>${esc(t.fHard(topicName(h.id), h.mean, h.fail))}${h.root ? ' ' + esc(t.fRoot(topicName(h.id), topicName(h.root.topic), h.root.rr)) : ''}</li>`).join('')}</ul>` : `<p>—</p>`}
+      ${hard.some((h) => an.mentors[h.id]) ? `<h2>${esc(t.mentorsTitle)}</h2><ul>${hard.filter((h) => an.mentors[h.id]).map((h) => `<li>${esc(topicName(h.id))}: ${esc(t.mentorText(an.mentors[h.id].school, an.mentors[h.id].va))}</li>`).join('')}</ul>` : ''}
       ${b ? `<h2>${esc(t.rpBooks)}</h2>
       <p>${esc(b.rawTop.id !== b.adjTop.id ? t.fBook(b.rawTop.id, b.adjTop.id) : t.fBookSame(b.adjTop.id))} ${esc(t.bkVerdict(b.adjTop.id, b.adjBottom.id, b.adjTop.adj - b.adjBottom.adj))}</p>
       <table class="table"><thead><tr><th>${t.textbook}</th><th class="n">${t.bkRaw}</th><th class="n">${t.bkAdj}</th></tr></thead>
@@ -336,20 +462,42 @@ const bind = {
       tr.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
     });
   },
+  books() {
+    const go = () => { state.sim = { from: $('#simFrom').value, to: $('#simTo').value }; rerenderKeepFocus('#simFrom'); };
+    $('#simFrom')?.addEventListener('change', go);
+    $('#simTo')?.addEventListener('change', () => { state.sim = { from: $('#simFrom').value, to: $('#simTo').value }; rerenderKeepFocus('#simTo'); });
+  },
+  schools() {
+    document.querySelectorAll('tr[data-school]').forEach((tr) => {
+      const toggle = () => { state.openSchool = state.openSchool === tr.dataset.school ? null : tr.dataset.school; render(); document.querySelector(`tr[data-school="${CSS.escape(tr.dataset.school)}"]`)?.focus(); };
+      tr.addEventListener('click', toggle);
+      tr.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+    });
+  },
   hours() {
     const total = $('#total'), maxc = $('#maxc');
     total.addEventListener('input', () => { state.hours.total = +total.value; rerenderKeepFocus('#total'); });
     maxc.addEventListener('input', () => { state.hours.maxChange = +maxc.value / 100; rerenderKeepFocus('#maxc'); });
+    $('#hrExport').addEventListener('click', () => {
+      const t = T(), r = rec();
+      const head = [t.col.topic, t.hrNow, t.hrRec, state.lang === 'kz' ? 'Айырма' : 'Изменение', `${t.hrEffect}, ${t.points}`];
+      const lines = [head, ...r.rows.map((x) => [topicName(x.id), x.current, x.recommended, x.delta, x.effect.toFixed(1).replace('.', ',')])];
+      download('olshem-hours.csv', lines.map((l) => l.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(';')).join('\n'));
+    });
   },
   data() {
     $('#file').addEventListener('change', async (e) => {
       const f = e.target.files[0];
       if (!f) return;
-      const text = await f.text();
-      const res = parseCSV(text);
       const t = T();
+      let res;
+      try {
+        res = /\.xlsx$/i.test(f.name) ? parseTable(await readXlsx(await f.arrayBuffer())) : parseCSV(await f.text());
+      } catch {
+        res = { errors: [{ code: 'badFile' }] };
+      }
       if (res.errors) {
-        state.uploadMsg = { ok: false, lines: res.errors.map((er) => (er.code === 'missingCol' ? t.err.missingCol(er.col) : typeof t.err[er.code] === 'function' ? t.err[er.code](er.line) : t.err[er.code])) };
+        state.uploadMsg = { ok: false, lines: res.errors.map((er) => (er.code === 'badFile' ? t.badFile : er.code === 'missingCol' ? t.err.missingCol(er.col) : typeof t.err[er.code] === 'function' ? t.err[er.code](er.line) : t.err[er.code])) };
       } else {
         load(res.dataset);
         state.uploadMsg = { ok: true, lines: [t.dtLoaded(res.dataset.rows.length)] };
