@@ -1,0 +1,11 @@
+{
+  "name": "olshem",
+  "version": "1.0.0",
+  "description": "Өлшем — аналитика эффективности учебников и учебных программ для методистов",
+  "type": "module",
+  "main": "server.js",
+  "scripts": { "start": "node server.js", "test": "node --test" },
+  "engines": { "node": ">=20" },
+  "dependencies": {},
+  "license": "MIT"
+}
