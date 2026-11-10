@@ -94,6 +94,22 @@ function build() {
     fs.writeFileSync(path.join(OUT, lang, 'index.json'), JSON.stringify(index));
     console.log(`${lang}: ${index.length} глав`);
   }
+  // Казахская версия должна совпадать с русской по структуре тестов.
+  const kzDir = path.join(ROOT, 'kz');
+  if (fs.existsSync(kzDir)) {
+    for (const f of fs.readdirSync(kzDir).filter((x) => /^g\d+\.md$/.test(x))) {
+      const id = f.replace('.md', '');
+      const ru = parseChapter(fs.readFileSync(path.join(ROOT, 'ru', f), 'utf8'), id);
+      const kz = parseChapter(fs.readFileSync(path.join(kzDir, f), 'utf8'), id);
+      const sig = (c) => c.tests.map((t) => `${t.type}${t.level}:${t.options.length}:${t.answer.join(',')}:${t.pairs.length}`).join('|');
+      const diffs = [];
+      if (sig(ru) !== sig(kz)) diffs.push('тесты');
+      if (ru.sections.length !== kz.sections.length) diffs.push(`разделы ${ru.sections.length}/${kz.sections.length}`);
+      if (ru.terms.length !== kz.terms.length) diffs.push(`термины ${ru.terms.length}/${kz.terms.length}`);
+      if (ru.grade !== kz.grade || ru.ent.join() !== kz.ent.join()) diffs.push('мета');
+      if (diffs.length) { bad++; console.error(`kz/${id} расходится с ru:`, diffs.join(', ')); }
+    }
+  }
   if (bad) process.exitCode = 1;
 }
 
