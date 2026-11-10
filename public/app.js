@@ -1,5 +1,6 @@
 import { generateDemo, analyze, recommendHours, simulateSwitch, toCSV, parseCSV, parseTable, FAIL } from './engine.js';
 import { readXlsx } from './xlsx.js';
+import { renderBook } from './book.js';
 import { STR, pct } from './i18n.js';
 
 const BOOK_COLORS = ['#1F4FC1', '#C26A00', '#009682'];
@@ -46,15 +47,15 @@ function applyDistrict() {
 }
 
 // ---------- каркас ----------
-const ROUTES = ['overview', 'topics', 'books', 'schools', 'hours', 'data', 'report'];
+const ROUTES = ['overview', 'topics', 'books', 'schools', 'hours', 'data', 'report', 'book'];
 function route() {
-  const r = location.hash.replace('#', '');
+  const r = location.hash.replace('#', '').split('/')[0];
   return ROUTES.includes(r) ? r : 'overview';
 }
 
 function renderNav() {
   const r = route();
-  $('#nav').innerHTML = ROUTES.map((k) => `<a href="#${k}" ${k === r ? 'aria-current="page"' : ''}>${esc(T().nav[k])}</a>`).join('');
+  $('#nav').innerHTML = ROUTES.map((k) => `<a href="#${k}" class="${k === 'book' ? 'nav-book' : ''}" ${k === r ? 'aria-current="page"' : ''}>${esc(T().nav[k])}</a>`).join('');
   $('[data-t="tagline"]').textContent = T().tagline;
   $('#lang').textContent = T().lang;
   document.documentElement.lang = state.lang === 'kz' ? 'kk' : 'ru';
@@ -77,6 +78,10 @@ function header(title, lead) {
 function render() {
   renderNav();
   const r = route();
+  if (r === 'book') {
+    renderBook($('#main'), state.lang, location.hash.split('/')[1]);
+    return;
+  }
   const view = { overview, topics, books, schools, hours, data, report }[r];
   $('#main').innerHTML = view();
   bind[r]?.();
