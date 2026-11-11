@@ -20,15 +20,19 @@
 
 ## Запуск
 
+Самый простой способ — открыть готовый сайт: https://olshem-production.up.railway.app
+
+Запустить у себя на компьютере (нужен установленный [Node.js](https://nodejs.org) версии 20 или новее):
+
 ```bash
-git clone <адрес репозитория>
+git clone https://github.com/k1rum1/olshem.git
 cd olshem
-npm start      # http://localhost:3000
-npm test
-node book-src/build.js   # пересобрать главы учебника после правок в book-src
+npm start
 ```
 
-Зависимостей нет, нужен Node 20+.
+После этого откройте в браузере http://localhost:3000 — это сайт, запущенный на вашем же компьютере.
+
+Для разработчиков: `npm test` запускает автоматические проверки, `node book-src/build.js` пересобирает главы учебника после правок в папке `book-src`.
 
 ## Свои данные
 
