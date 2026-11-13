@@ -67,7 +67,8 @@ export function generateDemo(seed = 2026) {
   for (const [district, n] of districts) {
     for (let i = 0; i < n; i++) {
       const urban = district === 'г. Тараз';
-      schools.push({ name: `СШ №${nums[k++]}`, district, strength: r.normal() * 5 + (urban ? 6 : 0) });
+      const num = nums[k++];
+      schools.push({ name: num === 7 ? 'Гимназия №7' : `СШ №${num}`, district, strength: r.normal() * 5 + (urban ? 6 : 0) });
     }
   }
   // Сильные городские школы чаще выбирают учебник Б — ловушка для «сырых» средних.
