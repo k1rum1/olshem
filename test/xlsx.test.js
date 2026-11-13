@@ -45,7 +45,7 @@ function makeXlsx(rows) {
 
 test('Excel: читает лист, проценты-доли и казахские заголовки', async () => {
   const rows = [['Мектеп', 'Оқулық', 'Оқушы', 'Тақырып', 'Сағат', 'Балл']];
-  for (let i = 0; i < 80; i++) rows.push([`СШ №${i % 8}`, i % 2 ? 'А' : 'Ә', `u${i}`, i % 3 ? 'Алгебраические дроби' : 'Одночлены', 10 + (i % 4), (35 + (i % 60)) / 100]);
+  for (let i = 0; i < 80; i++) rows.push([`СШ №${i % 8}`, i % 2 ? 'А' : 'С', `u${i}`, i % 3 ? 'Алгебраические дроби' : 'Одночлены', 10 + (i % 4), (35 + (i % 60)) / 100]);
   const table = await readXlsx(makeXlsx(rows));
   assert.equal(table.length, 81);
   assert.equal(table[1][0], 'СШ №0');

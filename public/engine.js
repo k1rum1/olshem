@@ -56,7 +56,7 @@ export function generateDemo(seed = 2026) {
   const prereq = { T4: 'T3', T5: 'T4', T6: 'T5', T8: 'T7' };
   const book = {
     'А': { T5: 2, T7: -7 },
-    'Ә': { T4: 3, T5: 6, T6: 8 },
+    'С': { T4: 3, T5: 6, T6: 8 },
     'Б': { T1: -2, T2: -2, T3: -2, T4: -2, T5: -3, T6: -6, T7: -1, T8: -5, T9: -1 },
   };
   const districts = [['г. Тараз', 8], ['Байзакский р-н', 4], ['Жамбылский р-н', 4], ['Кордайский р-н', 4], ['Шуский р-н', 4]];
@@ -73,9 +73,9 @@ export function generateDemo(seed = 2026) {
   }
   // Сильные городские школы чаще выбирают учебник Б — ловушка для «сырых» средних.
   const ranked = [...schools].sort((a, b) => b.strength - a.strength);
-  ranked.forEach((s, i) => { s.textbook = i < 8 ? (i === 6 ? 'А' : 'Б') : (i % 2 ? 'А' : 'Ә'); });
+  ranked.forEach((s, i) => { s.textbook = i < 8 ? (i === 6 ? 'А' : 'Б') : (i % 2 ? 'А' : 'С'); });
   ranked[13].textbook = 'Б';
-  ranked[2].textbook = 'Ә';
+  ranked[2].textbook = 'С';
 
   const rows = [];
   let sid = 0;

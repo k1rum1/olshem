@@ -21,8 +21,8 @@ test('поправка на уровень учеников меняет лид�
   const raw = [...an.textbooks].sort((a, b) => b.raw - a.raw)[0].id;
   const adj = [...an.textbooks].sort((a, b) => b.adj - a.adj)[0].id;
   assert.equal(raw, 'Б');
-  assert.equal(adj, 'Ә');
-  assert.ok(an.topicWinners.T6.best === 'Ә' && an.topicWinners.T6.confident);
+  assert.equal(adj, 'С');
+  assert.ok(an.topicWinners.T6.best === 'С' && an.topicWinners.T6.confident);
 });
 
 test('модель восстанавливает эффект часов: сложные темы чувствительнее', () => {
@@ -83,11 +83,11 @@ test('уровни усвоения в сумме дают 100%', () => {
   for (const t of an.topicStats) assert.ok(Math.abs(t.bands.reduce((a, b) => a + b, 0) - 1) < 1e-9);
 });
 
-test('симулятор: переход с Б на Ә выгоден, обратный — нет', async () => {
+test('симулятор: переход с Б на С выгоден, обратный — нет', async () => {
   const { simulateSwitch } = await import('../public/engine.js');
-  const s = simulateSwitch(an, 'Б', 'Ә');
+  const s = simulateSwitch(an, 'Б', 'С');
   assert.ok(s.gain > 0 && s.schools === 7);
-  assert.ok(simulateSwitch(an, 'Ә', 'Б').gain < 0);
+  assert.ok(simulateSwitch(an, 'С', 'Б').gain < 0);
   assert.equal(simulateSwitch(an, 'А', 'А'), null);
 });
 
