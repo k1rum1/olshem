@@ -47,7 +47,7 @@ function applyDistrict() {
 }
 
 // ---------- каркас ----------
-const ROUTES = ['overview', 'topics', 'books', 'schools', 'hours', 'data', 'report', 'book'];
+const ROUTES = ['overview', 'topics', 'books', 'schools', 'data', 'report', 'book'];
 function route() {
   const r = location.hash.replace('#', '').split('/')[0];
   return ROUTES.includes(r) ? r : 'overview';
@@ -82,7 +82,7 @@ function render() {
     renderBook($('#main'), state.lang, location.hash.split('/')[1]);
     return;
   }
-  const view = { overview, topics, books, schools, hours, data, report }[r];
+  const view = { overview, topics, books, schools, data, report }[r];
   $('#main').innerHTML = view();
   bind[r]?.();
   $('#district')?.addEventListener('change', (e) => { state.district = e.target.value; applyDistrict(); render(); $('#district')?.focus(); });
@@ -119,10 +119,6 @@ function overview() {
     const b = bookStory();
     findings.push({ text: b.rawTop.id !== b.adjTop.id ? t.fBook(b.rawTop.id, b.adjTop.id) : t.fBookSame(b.adjTop.id), href: '#books' });
   }
-  const r = rec();
-  const up = [...r.rows].sort((a, b) => b.delta - a.delta)[0];
-  const down = [...r.rows].sort((a, b) => a.delta - b.delta)[0];
-  if (up && down && up.delta > 0 && r.avgGain > 0.1) findings.push({ text: t.fHours(topicName(down.id), topicName(up.id), r.avgGain), href: '#hours' });
 
   return `
     ${header(t.ovTitle(hard.length), t.ovLead(an.overall, an.failOverall))}
@@ -429,7 +425,6 @@ function report() {
   const t = T(), an = state.an;
   const hard = hardTopics();
   const b = an.books.length > 1 ? bookStory() : null;
-  const r = rec();
   const roots = [...new Set(hard.filter((h) => h.root).map((h) => `«${topicName(h.root.topic)}»`))];
   const subject = state.lang === 'kz' ? state.ds.meta.subjectKz : state.ds.meta.subjectRu;
   const date = new Date().toLocaleDateString(state.lang === 'kz' ? 'kk-KZ' : 'ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -445,10 +440,6 @@ function report() {
       <p>${esc(b.rawTop.id !== b.adjTop.id ? t.fBook(b.rawTop.id, b.adjTop.id) : t.fBookSame(b.adjTop.id))} ${esc(t.bkVerdict(b.adjTop.id, b.adjBottom.id, b.adjTop.adj - b.adjBottom.adj))}</p>
       <table class="table"><thead><tr><th>${t.textbook}</th><th class="n">${t.bkRaw}</th><th class="n">${t.bkAdj}</th></tr></thead>
       <tbody>${b.byAdj.map((x) => `<tr><td>${esc(x.id)}</td><td class="n">${x.raw.toFixed(1)}%</td><td class="n strong">${x.adj.toFixed(1)}%</td></tr>`).join('')}</tbody></table>` : ''}
-      <h2>${esc(t.rpHours)}</h2>
-      <p>${esc(r.avgGain > 0.1 ? t.hrSummary(r.avgGain) : t.hrSummaryNeg)}</p>
-      <table class="table"><thead><tr><th>${t.col.topic}</th><th class="n">${t.hrNow}</th><th class="n">${t.hrRec}</th><th class="n">${t.hrEffect}</th></tr></thead>
-      <tbody>${r.rows.map((x) => `<tr><td>${esc(topicName(x.id))}</td><td class="n">${x.current}</td><td class="n strong">${x.recommended}</td><td class="n">${x.delta ? `${fmt1(x.effect)} ${t.points}` : '—'}</td></tr>`).join('')}</tbody></table>
       <h2>${esc(t.rpNext)}</h2>
       <ol>${t.rpNextItems(roots.join(', ')).map((x) => `<li>${esc(x)}</li>`).join('')}</ol>
       <p class="note">${esc(t.hrNote)}</p>
